@@ -63,7 +63,7 @@ uses
 
 type
   TtkTokenKind = (tkAsm, tkComment, tkDirective, tkIdentifier, tkKey, tkNull,
-    tkNumber, tkSpace, tkString, tkSymbol, tkUnknown);
+    tkNumber, tkSpace, tkString, tkSymbol, tkMustache, tkUnknown);
 
   TxtkTokenKind = (
     xtkAdd, xtkAddAssign, xtkAnd, xtkAndAssign, xtkArrow, xtkAssign,
@@ -79,7 +79,7 @@ type
 
   TRangeState = (rsUnknown, rsAnsiC, rsAnsiCAsm, rsAnsiCAsmBlock, rsAsm,
     rsAsmBlock, rsDirective, rsDirectiveComment, rsString34, rsString39,
-    rsMultiLineString);
+    rsMultiLineString, rsMustacheBlock);
 
   TProcTableProc = procedure of object;
 
@@ -110,6 +110,7 @@ type
     fSpaceAttri: TSynHighlighterAttributes;
     fStringAttri: TSynHighlighterAttributes;
     fSymbolAttri: TSynHighlighterAttributes;
+    fMustacheBlockAttri: TSynHighlighterAttributes;
     function KeyHash(ToHash: PChar): Integer;
     function KeyComp(const aKey: String): Boolean;
     function Func17: TtkTokenKind;
@@ -206,6 +207,7 @@ type
     function IdentKind(MayBe: PChar): TtkTokenKind;
     procedure MakeMethodTables;
     procedure StringEndProc;
+    procedure MustacheEndProc;
   protected
     function GetIdentChars: TSynIdentChars; override;
     function GetExtTokenID: TxtkTokenKind;
@@ -251,7 +253,9 @@ type
     property StringAttri: TSynHighlighterAttributes read fStringAttri
       write fStringAttri;
     property SymbolAttri: TSynHighlighterAttributes read fSymbolAttri
-      write fSymbolAttri;
+      write fSymbolAttri;  
+    property MustacheBlockAttri: TSynHighlighterAttributes read FMustacheBlockAttri
+      write FMustacheBlockAttri;
   end;
 
 implementation
@@ -737,9 +741,14 @@ begin
   inherited Create(AOwner);
   fAsmAttri := TSynHighlighterAttributes.Create(SYNS_AttrAssembler);
   AddAttribute(fAsmAttri);
+  fCommentAttri := TSynHighlighterAttributes.Create('MustacheBlock', 'MustacheBlock'); // TO-DO: Is this needed?
   fCommentAttri := TSynHighlighterAttributes.Create(SYNS_AttrComment);
   fCommentAttri.Style:= [fsItalic];
   AddAttribute(fCommentAttri);
+  fMustacheBlockAttri := TSynHighlighterAttributes.Create('MustachePart', SYNS_XML_AttrComment + 'Mustache');
+  fMustacheBlockAttri.Style:= [fsBold];
+  fMustacheBlockAttri.Foreground:= clRed;
+  AddAttribute(fMustacheBlockAttri);
   fIdentifierAttri := TSynHighlighterAttributes.Create(SYNS_AttrIdentifier);
   AddAttribute(fIdentifierAttri);
   fInvalidAttri := TSynHighlighterAttributes.Create(SYNS_AttrIllegalChar);
@@ -866,6 +875,11 @@ begin
   fTokenId := tkSymbol;
   FExtTokenID := xtkBraceClose;
   if fRange = rsAsmBlock then fRange := rsUnknown;
+  if fRange = rsMustacheBlock then
+  begin
+    Inc(Run);
+    fRange := rsUnknown;
+  end;
 end;
 
 procedure TSynCSSyn.BraceOpenProc;
@@ -873,7 +887,14 @@ begin
   inc(Run);
   fTokenId := tkSymbol;
   FExtTokenID := xtkBraceOpen;
-  if fRange = rsAsm then
+  if fLine[Run] = '{' then
+  begin
+    inc(Run);
+    //Dec(Run, 2);
+    FTokenID := tkMustache;
+    fRange := rsMustacheBlock;
+  end
+  else if fRange = rsAsm then
   begin
     fRange := rsAsmBlock;
     fAsmStart := True;
@@ -1216,7 +1237,15 @@ begin
       begin
         fTokenID := tkComment;
         inc(Run, 2);
-        while not (fLine[Run] in [#0, #10, #13]) do Inc(Run);
+        while not (fLine[Run] in [#0, #10, #13]) do
+        begin
+          Inc(Run);
+          if (fLine[Run] = '{') and (fLine[Run + 1] = '{') then
+          begin
+            fRange := rsMustacheBlock;
+            break;
+          end;
+        end;
       end;
     '*':                               {c style comments}
       begin
@@ -1379,6 +1408,46 @@ begin
     inc(Run);
 end;
 
+procedure TSynCSSyn.MustacheEndProc;
+begin
+  fTokenID := tkMustache;
+
+  case FLine[Run] of
+    #0:
+      begin
+        NullProc;
+        Exit;
+      end;
+    #10:
+      begin
+        LFProc;
+        Exit;
+      end;
+    #13:
+      begin
+        CRProc;
+        Exit;
+      end;
+  end;
+
+  while true do
+  begin
+    case FLine[Run] of
+      #0, #10, #13: Break;
+      '}':
+        begin
+          if (fLine[Run + 1] = '}') then
+          begin
+            Inc(Run, 2);
+            fRange := rsUnknown;
+            Break;
+          end;
+        end;
+    end;
+    inc(Run);
+  end;
+end;
+
 procedure TSynCSSyn.TildeProc;
 begin
   inc(Run);                            {bitwise complement}
@@ -1418,6 +1487,7 @@ begin
     rsAnsiCAsmBlock, rsDirectiveComment: AnsiCProc;
     rsDirective: DirectiveProc;
     rsMultilineString: StringEndProc;
+    rsMustacheBlock: MustacheEndProc;
   else
     begin
       fRange := rsUnknown;
@@ -1491,6 +1561,7 @@ begin
     tkString: Result := fStringAttri;
     tkSymbol: Result := fSymbolAttri;
     tkUnknown: Result := fInvalidAttri;
+    tkMustache: Result := fMustacheBlockAttri;
     else Result := nil;
   end;
 end;
