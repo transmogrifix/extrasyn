@@ -759,7 +759,7 @@ begin
   fNumberAttri := TSynHighlighterAttributes.Create(SYNS_AttrNumber);
   AddAttribute(fNumberAttri);
   fSpaceAttri := TSynHighlighterAttributes.Create(SYNS_AttrSpace);
-  fSpaceAttri.Foreground := clWindow;
+  //fSpaceAttri.Foreground := clWindow;
   AddAttribute(fSpaceAttri);
   fStringAttri := TSynHighlighterAttributes.Create(SYNS_AttrString);
   AddAttribute(fStringAttri);
